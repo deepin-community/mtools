@@ -20,15 +20,14 @@
  */
 
 #include "sysincludes.h"
-#include "msdos.h"
-#include "mainloop.h"
-#include "vfat.h"
-#include "mtools.h"
 #include "nameclash.h"
 #include "file_name.h"
+#include "vfat.h"
+#include "stream.h"
 
-static void _label_name(doscp_t *cp, const char *filename, int verbose UNUSEDP,
-			int *mangled, dos_name_t *ans, int preserve_case)
+static void mt_label_name(doscp_t *cp, const char *filename,
+			  int verbose UNUSEDP, int *mangled, dos_name_t *ans,
+			  int preserve_case)
 {
 	size_t len;
 	size_t i;
@@ -46,9 +45,9 @@ static void _label_name(doscp_t *cp, const char *filename, int verbose UNUSEDP,
 
 	have_lower = have_upper = 0;
 	for(i=0; i<len; i++){
-		if(islower(wbuffer[i]))
+		if(iswlower((wint_t)wbuffer[i]))
 			have_lower = 1;
-		if(isupper(wbuffer[i]))
+		if(iswupper((wint_t)wbuffer[i]))
 			have_upper = 1;
 		if(!preserve_case)
 			wbuffer[i] = ch_towupper(wbuffer[i]);
@@ -71,13 +70,13 @@ static void _label_name(doscp_t *cp, const char *filename, int verbose UNUSEDP,
 void label_name_uc(doscp_t *cp, const char *filename, int verbose,
 		   int *mangled, dos_name_t *ans)
 {
-	_label_name(cp, filename, verbose, mangled, ans, 0);
+	mt_label_name(cp, filename, verbose, mangled, ans, 0);
 }
 
 void label_name_pc(doscp_t *cp, const char *filename, int verbose,
 		   int *mangled, dos_name_t *ans)
 {
-	_label_name(cp, filename, verbose, mangled, ans, 1);
+	mt_label_name(cp, filename, verbose, mangled, ans, 1);
 }
 
 int labelit(struct dos_name_t *dosname,
@@ -114,7 +113,6 @@ void mlabel(int argc, char **argv, int type UNUSEDP)
 	char longname[VBUFSIZE];
 	char shortname[45];
 	ClashHandling_t ch;
-	struct MainParam_t mp;
 	Stream_t *RootDir;
 	int c;
 	int mangled;
@@ -159,7 +157,7 @@ void mlabel(int argc, char **argv, int type UNUSEDP)
 			case 'n':
 				set_serial = SER_RANDOM;
 				init_random();
-				serial=(uint32_t) random();
+				serial=(uint32_t) lrand48();
 				break;
 			case 'N':
 				set_serial = SER_SET;
@@ -191,7 +189,6 @@ void mlabel(int argc, char **argv, int type UNUSEDP)
 	    drive = get_default_drive();
 	}
 
-	init_mp(&mp);
 	if(strlen(newLabel) > VBUFSIZE) {
 		fprintf(stderr, "Label too long\n");
 		FREE(&RootDir);
@@ -283,7 +280,7 @@ void mlabel(int argc, char **argv, int type UNUSEDP)
 	have_boot = 0;
 	if( (!show || newLabel[0]) || set_serial != SER_NONE) {
 		Fs = GetFs(RootDir);
-		have_boot = (force_read(Fs,boot.characters,0,sizeof(boot)) ==
+		have_boot = (force_pread(Fs,boot.characters,0,sizeof(boot)) ==
 			     sizeof(boot));
 	}
 
@@ -320,13 +317,13 @@ void mlabel(int argc, char **argv, int type UNUSEDP)
 	}
 
 	if(need_write_boot) {
-		force_write(Fs, (char *)&boot, 0, sizeof(boot));
+		force_pwrite(Fs, (char *)&boot, 0, sizeof(boot));
 		/* If this is fat 32, write backup boot sector too */
 		if(!WORD_S(fatlen)) {
 			int backupBoot = WORD_S(ext.fat32.backupBoot);
-			force_write(Fs, (char *)&boot,
-				    backupBoot * WORD_S(secsiz),
-				    sizeof(boot));
+			force_pwrite(Fs, (char *)&boot,
+				     backupBoot * WORD_S(secsiz),
+				     sizeof(boot));
 		}
 	}
 

@@ -15,7 +15,6 @@
  *  along with Mtools.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdarg.h>
 #include "sysincludes.h"
 #include "mtools.h"
 
@@ -170,12 +169,21 @@ static void set_raw_tty(int mode)
 }
 #endif
 
-FILE *opentty(int mode UNUSEDP)
+FILE *opentty(int mode
+#ifndef USE_RAWTERM
+	      UNUSEDP
+#endif
+	      )
 {
 	if(notty)
 		return NULL;
 	if (tty == NULL) {
+#ifdef OS_mingw32msvc
+		/* tty is called CONIN$ on Windows ... */
+		ttyfd = open("CONIN$", O_RDONLY);
+#else
 		ttyfd = open("/dev/tty", O_RDONLY);
+#endif
 		if(ttyfd >= 0) {
 			tty = fdopen(ttyfd, "r");
 		}

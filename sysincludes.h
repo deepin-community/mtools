@@ -1,4 +1,4 @@
-/*  Copyright 1996-1999,2001,2002,2007-2009 Alain Knaff.
+/*  Copyright 1996-1999,2001,2002,2007-2009,2022 Alain Knaff.
  *  This file is part of mtools.
  *
  *  Mtools is free software: you can redistribute it and/or modify
@@ -20,10 +20,20 @@
 #ifndef SYSINCLUDES_H
 #define SYSINCLUDES_H
 
-#define _LARGEFILE64_SOURCE
-#define _GNU_SOURCE
+#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6) || defined(__clang__)
+# define HAVE_PRAGMA_DIAGNOSTIC 1
+#endif
+
+#if defined HAVE_PRAGMA_DIAGNOSTIC && defined __clang__
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wreserved-macro-identifier"
+#endif
 
 #include "config.h"
+
+#if defined HAVE_PRAGMA_DIAGNOSTIC && defined __clang__
+# pragma clang diagnostic pop
+#endif
 
 
 /* OS/2 needs __inline__, but for some reason is not autodetected */
@@ -53,14 +63,6 @@
 #endif
 
 
-/* On AIX, we have to prefer strings.h, as string.h lacks a prototype
- * for strcasecmp. On most other architectures, it's string.h which seems
- * to be more complete */
-#if (defined OS_aix && defined HAVE_STRINGS_H)
-# undef HAVE_STRING_H
-#endif
-
-
 #ifdef OS_ultrix
 /* on ultrix, if termios present, prefer it instead of termio */
 # ifdef HAVE_TERMIOS_H
@@ -86,11 +88,6 @@ ac_cv_func_setpgrp_void=yes ../mtools/configure --build=i386-linux-gnu --host=i3
 #endif
 #endif
 
-#ifndef HAVE_CADDR_T
-typedef void *caddr_t;
-#endif
-
-
 /***********************************************************************/
 /*                                                                     */
 /* Compiler dependencies                                               */
@@ -110,6 +107,13 @@ typedef void *caddr_t;
 # if __GNUC__ >= 8
 #  define NONULLTERM __attribute__ ((nonstring))
 # endif
+# if __GNUC__ >= 7
+#  define FALLTHROUGH __attribute__ ((fallthrough));
+# endif
+#endif
+
+#if defined(__clang__) && __clang_major__ >= 12
+#  define FALLTHROUGH __attribute__ ((fallthrough));
 #endif
 
 #ifndef UNUSED
@@ -129,14 +133,16 @@ typedef void *caddr_t;
 # define NONULLTERM /* */
 #endif
 
+#ifndef FALLTHROUGH
+# define FALLTHROUGH /* FALL THROUGH */
+#endif
+
+
 /***********************************************************************/
 /*                                                                     */
 /* Include files                                                       */
 /*                                                                     */
 /***********************************************************************/
-
-#define _LARGEFILE64_SOURCE
-#define _GNU_SOURCE
 
 #ifdef HAVE_ASSERT_H
 # include <assert.h>
@@ -146,11 +152,42 @@ typedef void *caddr_t;
 # include <features.h>
 #endif
 
-
-#include <sys/types.h>
-
+#include <stdio.h>
+#ifdef HAVE_SYS_TYPES_H
+# include <sys/types.h>
+#endif
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
+#endif
+#ifdef STDC_HEADERS
+# include <stdlib.h>
+# include <stddef.h>
+#else
+# ifdef HAVE_STDLIB_H
+#  include <stdlib.h>
+# endif
+#endif
+#ifdef HAVE_STRING_H
+# if !defined STDC_HEADERS && defined HAVE_MEMORY_H
+#  include <memory.h>
+# endif
+# include <string.h>
+#endif
+#ifdef HAVE_STRINGS_H
+# include <strings.h>
+#endif
+#ifdef HAVE_INTTYPES_H
+# include <inttypes.h>
+#endif
 #ifdef HAVE_STDINT_H
 # include <stdint.h>
+#endif
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
+
+#ifdef HAVE_STDARG_H
+# include <stdarg.h>
 #endif
 
 #if HAVE_STDBOOL_H
@@ -169,24 +206,7 @@ typedef unsigned char _Bool;
 # define __bool_true_false_are_defined 1
 #endif
 
-#ifdef HAVE_INTTYPES_H
-# include <inttypes.h>
-#endif
-
-#ifdef HAVE_STDLIB_H
-# include <stdlib.h>
-#endif
-
-#include <stdio.h>
 #include <ctype.h>
-
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-
-#ifdef HAVE_LINUX_UNISTD_H
-# include <linux/unistd.h>
-#endif
 
 #ifdef HAVE_LIBC_H
 # include <libc.h>
@@ -194,6 +214,11 @@ typedef unsigned char _Bool;
 
 #ifdef HAVE_GETOPT_H
 # include <getopt.h>
+#endif
+
+#if !HAVE_DECL_OPTARG
+extern char *optarg;
+extern int optind;
 #endif
 
 #ifdef HAVE_FCNTL_H
@@ -219,14 +244,11 @@ typedef unsigned char _Bool;
  * suppress warnings if the platform is broken, as long as these warnings do
  * not prevent compilation */
 
-#ifdef TIME_WITH_SYS_TIME
-# include <sys/time.h>
+#ifdef HAVE_TIME_H
 # include <time.h>
 #else
 # ifdef HAVE_SYS_TIME_H
 #  include <sys/time.h>
-# else
-#  include <time.h>
 # endif
 #endif
 
@@ -286,29 +308,13 @@ extern int ioctl(int fildes, int request, void *arg);
 # endif
 #endif
 
-
-#include <sys/stat.h>
-
 #include <errno.h>
-#ifndef errno
+#if !HAVE_DECL_ERRNO
 extern int errno;
 #endif
 
 #ifndef OS_mingw32msvc
 #include <pwd.h>
-#endif
-
-
-#ifdef HAVE_STRING_H
-# include <string.h>
-#else
-# ifdef HAVE_STRINGS_H
-#  include <strings.h>
-# endif
-#endif
-
-#ifdef HAVE_MEMORY_H
-# include <memory.h>
 #endif
 
 #ifdef HAVE_MALLOC_H
@@ -339,9 +345,24 @@ extern int errno;
 
 #ifdef HAVE_WCHAR_H
 # include <wchar.h>
+# ifdef HAVE_WCTYPE_H
+#  include <wctype.h>
+# endif
 # ifndef HAVE_PUTWC
 #  define putwc(c,f) fprintf((f),"%lc",(c))
 # endif
+# ifndef HAVE_WCSDUP
+wchar_t *wcsdup(const wchar_t *wcs);
+# endif
+
+# ifndef HAVE_WCSCASECMP
+int wcscasecmp(const wchar_t *s1, const wchar_t *s2);
+# endif
+
+# ifndef HAVE_WCSNLEN
+size_t wcsnlen(const wchar_t *wcs, size_t l);
+# endif
+
 #else
 # define wcscmp strcmp
 # define wcscasecmp strcasecmp
@@ -349,13 +370,9 @@ extern int errno;
 # define wcslen strlen
 # define wcschr strchr
 # define wcspbrk strpbrk
-# define wchar_t char
+# define wchar_t unsigned char
+# define wint_t int
 # define putwc putc
-#endif
-
-#ifdef HAVE_WCTYPE_H
-# include <wctype.h>
-#else
 # define towupper(x) toupper(x)
 # define towlower(x) tolower(x)
 # define iswupper(x) isupper(x)
@@ -369,38 +386,6 @@ extern int errno;
 
 #ifdef HAVE_XLOCALE_H
 # include <xlocale.h>
-#endif
-
-#ifdef USE_FLOPPYD
-
-#ifdef HAVE_SYS_SOCKET_H
-#include <sys/socket.h>
-#endif
-
-#ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
-#endif
-
-#ifdef HAVE_NETINET_TCP_H
-#include <netinet/tcp.h>
-#endif
-
-#ifdef HAVE_ARPA_INET_H
-#include <arpa/inet.h>
-#endif
-
-#ifdef HAVE_NETDB_H
-#include <netdb.h>
-#endif
-
-#ifdef HAVE_X11_XAUTH_H
-#include <X11/Xauth.h>
-#endif
-
-#ifdef HAVE_X11_XLIB_H
-#include <X11/Xlib.h>
-#endif
-
 #endif
 
 #ifndef INADDR_NONE
@@ -427,12 +412,12 @@ extern int errno;
 # endif
 #endif
 
-#ifndef HAVE_RANDOM
-# ifdef OS_mingw32msvc
-#  define random (long)rand
-# else
-#  define random (long)lrand48
-# endif
+#ifndef HAVE_SRAND48
+#  define srand48 srand
+#endif
+
+#ifndef HAVE_LRAND48
+#  define lrand48 rand
 #endif
 
 #ifndef HAVE_STRCHR
@@ -443,6 +428,9 @@ extern int errno;
 # define strrchr rindex
 #endif
 
+#ifndef HAVE_STRSTR
+extern char * strstr (const char* haystack, const char *needle);
+#endif
 
 #ifndef HAVE_STRDUP
 extern char *strdup(const char *str);
@@ -509,21 +497,6 @@ int strncasecmp(const char *s1, const char *s2, size_t n);
 char *getpass(const char *prompt);
 #endif
 
-#ifdef HAVE_WCHAR_H
-
-# ifndef HAVE_WCSDUP
-wchar_t *wcsdup(const wchar_t *wcs);
-# endif
-
-# ifndef HAVE_WCSCASECMP
-int wcscasecmp(const wchar_t *s1, const wchar_t *s2);
-# endif
-
-# ifndef HAVE_WCSNLEN
-size_t wcsnlen(const wchar_t *wcs, size_t l);
-# endif
-
-#endif
 
 #if 0
 #ifndef HAVE_BASENAME
@@ -531,9 +504,9 @@ const char *basename(const char *filename);
 #endif
 #endif
 
-const char *_basename(const char *filename);
+const char *mt_basename(const char *filename);
 
-void _stripexe(char *filename);
+void mt_stripexe(char *filename);
 
 #ifndef __STDC__
 # ifndef signed
@@ -541,6 +514,32 @@ void _stripexe(char *filename);
 # endif
 #endif /* !__STDC__ */
 
+#ifndef UINT8_MAX
+#define UINT8_MAX (0xff)
+#endif
+
+#ifndef UINT16_MAX
+#define UINT16_MAX (0xffff)
+#endif
+
+#ifndef UINT32_MAX
+#define UINT32_MAX (0xffffffffU)
+#endif
+
+#ifndef O_ACCMODE
+#define O_ACCMODE (O_RDONLY | O_RDWR | O_WRONLY)
+#endif
+
+
+#if defined OS_hpux || \
+    defined OS_sunos || defined OS_solaris || \
+    defined OS_linux || \
+    (defined _SCO_DS) && (defined SCSIUSERCMD) || \
+    defined sgi || \
+    (defined OS_freebsd) && (__FreeBSD__ >= 2) || \
+    defined(OS_netbsd) || defined(OS_netbsdelf)
+# define HAVE_SCSI
+#endif
 
 
 /***************************************************************************/
@@ -633,6 +632,75 @@ struct utimbuf
 # undef HAVE_OFFSET_T
 #endif
 
+#if (defined (CPU_m68000) && defined (OS_sysv))
+/* AT&T UnixPC lacks prototypes for some system functions */
+void *calloc(size_t nmemb, size_t size);
+ssize_t read(int fd, void *buf, size_t count);
+ssize_t write(int fd, const void *buf, size_t count);
+int access(const char *pathname, int mode);
+int open(const char *path, int oflag, ...);
+int close(int fildes);
+int lockf(int fd, int cmd, off_t len);
+off_t lseek(int fd, off_t offset, int whence);
+int ioctl(int fd, unsigned long request, ...);
+int fcntl(int fd, int cmd, ...);
+int pipe(int pipefd[2]);
+int dup(int oldfd);
+int stat(const char *path, struct stat *buf);
+int fstat(int fd, struct stat *statbuf);
+#define S_ISREG(x) ((x)&S_IFREG)
+#define S_ISDIR(x) ((x)&S_IFDIR)
+#define S_ISLNK(x) (0)
+int toupper(int c);
+int tolower(int c);
+void srand48(long seed);
+long lrand48(void);
+time_t time(time_t *);
+long strtol(const char *str, char **ptr, int base);
+int printf(const char *format, ...);
+int fprintf(FILE *stream, const char *format, ...);
+int sprintf(char *s, const char *format, ...);
+int vfprintf(FILE *stream, const char *format, ...);
+int sscanf(const char *str, const char *format, ...);
+int fclose(FILE *stream);
+void perror(const char *s);
+int fflush(FILE *stream);
+size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
+void exit(int status);
+int fputs(char *, FILE *stream);
+int fputc(int c, FILE *stream);
+int fgetc(FILE *stream);
+int isatty(int fd);
+int atexit(void (*function)(void));
+int getuid(void);
+int geteuid(void);
+int getegid(void);
+int getgid(void);
+int setuid(uid_t uid);
+int setgid(gid_t gid);
+void bcopy(const void *src, void *dest, size_t n);
+int _flsbuf(unsigned char x, FILE *p);
+pid_t fork(void);
+int execl(const char *pathname, const char *arg, ...);
+int execvp(const char *file, char *const argv[]);
+pid_t wait(int *stat_loc);
+int kill(pid_t pid, int sig);
+char *getpass(const char *prompt);
+int getopt(int argc, char * const argv[], const char *optstring);
+char *getenv(const char *name);
+char *getlogin(void);
+struct passwd *getpwnam(const char *name);
+struct passwd *getpwuid(uid_t uid);
+int unlink(const char *pathname);
+int access(const char *pathname, int mode);
+int mkdir (const char* file, int mode);
+unsigned int sleep(unsigned int seconds);
+#endif
+
+#ifndef HAVE_LSTAT
+#define lstat stat
+#endif
 
 #ifdef HAVE_STAT64
 #define MT_STAT stat64
@@ -649,10 +717,28 @@ struct utimbuf
 #define O_LARGEFILE 0
 #endif
 
-#ifndef __GNUC__
-#ifndef __inline__
-#define __inline__ inline
+/* printf formatting strings for size_t type. We could use %z here,
+   but it is hard to autodetect whether this will work. Compiler may
+   well be C99, but not the libc (such as unixpc with gcc -std=gnu99) */
+#if SIZEOF_SIZE_T > SIZEOF_LONG
+# define SZF "%llu"
+# define SSZF "%lld"
+#else
+# if SIZEOF_SIZE_T > SIZEOF_INT
+#  define SZF "%lu"
+#  define SSZF "%ld"
+# else
+#  define SZF "%u"
+#  define SSZF "%d"
+# endif
 #endif
+
+#ifndef PRIu32
+# if SIZEOF_INT >= 32
+#  define PRIu32 "%u"
+# else
+#  define PRIu32 "%lu"
+# endif
 #endif
 
 #endif

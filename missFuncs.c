@@ -1,5 +1,5 @@
 /*  Copyright 1991 Free Software Foundation, Inc.
- *  Copyright 1997,1999-2002,2007-2009 Alain Knaff.
+ *  Copyright 1997,1999-2002,2007-2009,2022 Alain Knaff.
  *  This file is part of mtools.
  *
  *  Mtools is free software: you can redistribute it and/or modify
@@ -52,7 +52,7 @@ char *strndup( const char *s, size_t n )
     if ( !s )
         return 0;
 
-    nAvail = min( strlen(s) + 1, n + 1 );
+    nAvail = mt_min( strlen(s) + 1, n + 1 );
     p      = malloc( nAvail );
     if ( !p )
 	    return 0;
@@ -65,6 +65,7 @@ char *strndup( const char *s, size_t n )
 
 
 #ifdef HAVE_WCHAR_H
+#include "file_name.h"
 #ifndef HAVE_WCSDUP
 wchar_t *wcsdup(const wchar_t *wcs)
 {
@@ -148,6 +149,53 @@ char * strrchr (const char* s1, int c)
 
 #endif
 
+#ifndef HAVE_STRSTR
+char * strstr (const char* haystack, const char *needle)
+{
+	const char *start;
+	int i;
+	if (!haystack) return NULL;
+	for(start=haystack; *start;start++) {
+		for(i=0; start[i] && needle[i]; i++)
+			if(start[i] != needle[i])
+				break;
+		if(!needle[i])
+			return (char *)start;
+	}
+	return NULL;
+}
+#endif
+
+#ifndef HAVE_MKDIR
+int mkdir (const char* file, int mode)
+{
+	pid_t pid;
+	int stat_loc;
+	
+	switch(pid=fork()) {
+	case 0: /* in the child */
+		execl("/bin/mkdir", "mkdir", file, 0);
+		perror("execl");
+		exit(127);
+		break;
+	case -1:
+		perror("fork");
+		return -1;
+	default:
+		if(wait(&stat_loc) <0) {
+			perror("wait");
+			return -1;
+		} else if((stat_loc & 0xffff) != 0) {
+			fprintf(stderr, "wait returned %x\n",
+				stat_loc & 0xffff);
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
+
 #ifndef HAVE_STRPBRK
 /*
  * Return ptr to first occurrence of any character from `brkset'
@@ -170,6 +218,30 @@ char *strpbrk(const char *string, const char *brkset)
 }
 #endif /* HAVE_STRPBRK */
 
+#ifdef HAVE_WCHAR_H
+#ifndef HAVE_WCSPBRK
+/*
+ * Return ptr to first occurrence of any character from `brkset'
+ * in the character string `string'; NULL if none exists.
+ */
+wchar_t *wcspbrk(const wchar_t *string, const wchar_t *brkset)
+{
+	register const wchar_t *p;
+
+	if (!string || !brkset)
+		return(0);
+	do {
+		for (p = brkset; *p != '\0' && *p != *string; ++p)
+			;
+		if (*p != '\0')
+			return((wchar_t *)string);
+	}
+	while (*string++);
+	return(0);
+}
+#endif /* HAVE_WCSPBRK */
+#endif
+
 
 #ifndef HAVE_STRTOUL
 static int getdigit(char a, int max)
@@ -184,6 +256,8 @@ static int getdigit(char a, int max)
 		dig = a - 'a' + 10;
 	else if(a >= 'A')
 		dig = a - 'A' + 10;
+	else
+		return -1;
 	if(dig >= max)
 		return -1;
 	else
@@ -288,7 +362,7 @@ size_t strcspn (const char *s, const char *reject)
 
 #ifndef HAVE_STRERROR
 
-#ifndef DECL_SYS_ERRLIST
+#if !HAVE_DECL_SYS_ERRLIST
 extern char *sys_errlist[];
 #endif
 
@@ -444,7 +518,7 @@ void myexit(int code)
 static const char PATH_SEP = '/';
 
 /*#ifndef HAVE_BASENAME*/
-const char *_basename(const char *filename)
+const char *mt_basename(const char *filename)
 {
 	char *ptr;
 
@@ -463,7 +537,7 @@ const char *_basename(const char *filename)
 /*#endif*/
 
 /* Strip the suffix ".exe" from the argument, if present. */
-void _stripexe(char *filename)
+void mt_stripexe(char *filename)
 {
 	char *ptr;
 	ptr = strrchr(filename, '.');
