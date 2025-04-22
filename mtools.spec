@@ -1,12 +1,12 @@
 %define _binary_payload w9.gzdio
 Name:           mtools
 Summary:        mtools, read/write/list/format DOS disks under Unix
-Version:        4.0.32
+Version:        4.0.48
 Release:        1
 License:        GPLv3+
 Group:          Utilities/System
 URL:            http://www.gnu.org/software/mtools/
-Source:         ftp://ftp.gnu.org/gnu/%{name}/%{name}-%{version}.tar.gz
+Source:         http://ftp.gnu.org/gnu/%{name}/%{name}-%{version}.tar.gz
 Buildroot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
 
@@ -49,10 +49,10 @@ rm %{buildroot}%{_infodir}/dir
 %{_mandir}/man1/mbadblocks.1*
 %{_mandir}/man1/mcat.1*
 %{_mandir}/man1/mcd.1*
-%{_mandir}/man1/mclasserase.1*
 %{_mandir}/man1/mcopy.1*
 %{_mandir}/man1/mdel.1*
 %{_mandir}/man1/mdeltree.1*
+%{_mandir}/man1/mdoctorfat.1*
 %{_mandir}/man1/mdir.1*
 %{_mandir}/man1/mdu.1*
 %{_mandir}/man1/mformat.1*
@@ -77,11 +77,11 @@ rm %{buildroot}%{_infodir}/dir
 %{_bindir}/mbadblocks
 %{_bindir}/mcat
 %{_bindir}/mcd
-%{_bindir}/mclasserase
 %{_bindir}/mcopy
 %{_bindir}/mdel
 %{_bindir}/mdeltree
 %{_bindir}/mdir
+%{_bindir}/mdoctorfat
 %{_bindir}/mdu
 %{_bindir}/mformat
 %{_bindir}/minfo
@@ -135,6 +135,99 @@ if [ -f %{_bindir}/install-info ] ; then
 fi
 
 %changelog
+* Sat Feb 22 2025 Alain Knaff <alain@knaff.lu>
+- portability fixes, mostly for Watcom compiler
+- cleaned up some other warnings
+- various runtime fixes for windows (/dev/tty vs CONIN$)
+- use correct mtools (sub)command name in usage() when using -c
+- other usage() spelling/wording fixes
+- fix mtype'ing multiple files at once
+- integrate mkmanpages into make system, clean it, and credit
+  texi2roff's original developer and others
+- document compilation on less usual environments in INSTALL
+- uninitialized buffer fix in mformat
+- fix parameter counting error in mcd, and document that image
+  file name is not remembered
+* Sun Jan 19 2025 Alain Knaff <alain@knaff.lu>
+- fixed some of the manpage issues reported by manpage-l10n
+- unix-dir copying on Windows fix
+- new no-daemon mode for floppyd to make testing easier
+- make floppyd independant of XauFileName (portability)
+- autoconf fixes
+* Thu Nov 21 2024 Alain Knaff <alain@knaff.lu>
+- iconv buffer overflow fixes
+- removed references to mread and mwrite (obsolete subcommands
+  from mcopy)
+- documented mdoctorfat, and addressed 2 bugs/oversights
+- removed references to obsolete mread and mwrite
+- portability fixes (dietlibc and MacOS X) & simplification
+* Sat Sep 28 2024 Alain Knaff <alain@knaff.lu>
+- Fixed iconv descriptor leak
+- Fixed size of error message buffer
+* Sun Jun 02 2024 Alain Knaff <alain@knaff.lu>
+- Added documentation for size parameters
+- Fix parsing of fat_start (reserved sectors) in mformat.c so
+  as to allow more than 255
+- Rewrite autorename in vfat.c such that it doesn't
+  (temporarily) overwrite byte after name string
+- Switch statement fall-through fixes (size parsing, and bios disk in
+  mformat.c)
+- Compilation warning fixes, mostly for CLANG
+* Tue Mar 21 2023 Alain Knaff <alain@knaff.lu>
+- Fix root directory test in mattrib
+- -b BiosDisk flag for mformat to allow setting physdrive to a user-specified
+  value
+- Clearer error message in mformat when trying to mformat a disk whose total
+  size is not known
+- Make recursive copy more consistent
+- Trailing slash now always implies target should be a directory
+- Code cleanup
+* Sat Oct 22 2022 Alain Knaff <alain@knaff.lu>
+- Added postcmd attribute in drive description to allow to
+  execute "device release" code automatically at end of command
+- Code cleanup (unneeded functions, initializations, added
+  comments to unobvious code, obsolete stuff in Makefile)
+- signedness cleanup about directory entries
+* Sun Sep 18 2022 Alain Knaff <alain@knaff.lu>
+- Made it possible again to have FAT32 filesystems with less
+  than 0xfff5 clusters
+- Make FAT32 entries 0 and 1 match what windows 10 does
+- Misc source code and configure script cleanup
+* Sat Jun 04 2022 Alain Knaff <alain@knaff.lu>
+- Remove libbsd dependency
+- Better compatibility with legacy platforms such as AT&T UnixPC
+- Upgraded to autoconf 2.71
+* Sun Apr 10 2022 Alain Knaff <alain@knaff.lu>
+- Rename strtoi to strosi (string to signed int). The strtoi function
+  on BSD does something else (returns an intmax, not an int)
+* Thu Mar 03 2022 Alain Knaff <alain@knaff.lu>
+- Make sure case byte is cleared when making the special
+  directory entries "." and ".."
+* Sun Dec 26 2021 Alain Knaff <alain@knaff.lu>
+- Removed mclasserase commands, which doesn't fit the coding
+  structure of the rest of mtools
+- Add support to -i option to mcd
+- Document -i in mtools.1
+- Fix a missing command error in floppyd_io.c
+* Sun Nov 21 2021 Alain Knaff <alain@knaff.lu>
+- Fix error status of recursive listing of empty root directory
+- If recursive listing, also show matched files at level one
+- Use "seekless" reads & write internally, where possible
+- Text mode conversion refactoring
+- Misc refactoring
+* Fri Aug 06 2021 Alain Knaff <alain@knaff.lu>
+- Fix cluster padding at end of file in batch mode, and add comments about what
+  happens here
+* Fri Jul 23 2021 Alain Knaff <alain@knaff.lu>
+- Fix mcopy -s issue
+* Sat Jul 17 2021 Alain Knaff <alain@knaff.lu>
+- Fix support for partitions (broken in 4.0.30)
+- Portability fixes for Solaris 10 and 11
+- General simplification of configure script, and largefile handling
+- Tested and fixed for platforms *without* largefile support
+- In cases where lseek works with 32-bit offsets, prefer lseek64 over llseek
+- Fixed floppy sector size handling on platforms that are not Linux
+- Added support for image files on command line to mcat
 * Sat Jul 10 2021 Alain Knaff <alain@knaff.lu>
 - Simplify algorithm that choses filesystem parameters for
   format, and align it more closely with what Win7 does

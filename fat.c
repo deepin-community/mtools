@@ -23,7 +23,7 @@
 #include "fsP.h"
 #include "file_name.h"
 
-#ifdef HAVE_LONG_LONG
+#if defined HAVE_LONG_LONG && defined __STDC_VERSION__
 typedef long long fatBitMask;
 #else
 typedef long fatBitMask;
@@ -38,27 +38,27 @@ typedef struct FatMap_t {
 #define SECT_PER_ENTRY (sizeof(fatBitMask)*8)
 #define ONE ((fatBitMask) 1)
 
-static __inline__ ssize_t readSector(Fs_t *This, char *buf, unsigned int off,
+static inline ssize_t readSector(Fs_t *This, char *buf, unsigned int off,
 				     size_t size)
 {
-	return READS(This->Next, buf, sectorsToBytes((Stream_t *)This, off),
-		     size << This->sectorShift);
+	return PREADS(This->head.Next, buf, sectorsToBytes(This, off),
+		      size << This->sectorShift);
 }
 
 
-static __inline__ ssize_t forceReadSector(Fs_t *This, char *buf,
+static inline ssize_t forceReadSector(Fs_t *This, char *buf,
 					  unsigned int off, size_t size)
 {
-	return force_read(This->Next, buf, sectorsToBytes((Stream_t *)This, off),
-					  size << This->sectorShift);
+	return force_pread(This->head.Next, buf, sectorsToBytes(This, off),
+			   size << This->sectorShift);
 }
 
 
-static __inline__ ssize_t forceWriteSector(Fs_t *This, char *buf, unsigned int off,
+static inline ssize_t forceWriteSector(Fs_t *This, char *buf, unsigned int off,
 					   size_t size)
 {
-	return force_write(This->Next, buf, sectorsToBytes((Stream_t*)This, off),
-					   size << This->sectorShift);
+	return force_pwrite(This->head.Next, buf, sectorsToBytes(This, off),
+			    size << This->sectorShift);
 }
 
 
@@ -83,7 +83,7 @@ static FatMap_t *GetFatMap(Fs_t *Stream)
 	return map;
 }
 
-static __inline__ int locate(Fs_t *Stream, uint32_t offset,
+static inline int locate(Fs_t *Stream, uint32_t offset,
 			     uint32_t *slot, uint32_t *bit)
 {
 	if(offset >= Stream->fat_len)
@@ -93,7 +93,7 @@ static __inline__ int locate(Fs_t *Stream, uint32_t offset,
 	return 0;
 }
 
-static __inline__ ssize_t fatReadSector(Fs_t *This,
+static inline ssize_t fatReadSector(Fs_t *This,
 					unsigned int sector,
 					unsigned int slot,
 					unsigned int bit, unsigned int dupe,
@@ -232,8 +232,8 @@ static unsigned char *loadSector(Fs_t *This,
 }
 
 
-static unsigned char *getAddress(Fs_t *Stream,
-				 unsigned int num, fatAccessMode_t mode)
+static uintptr_t getAddress(Fs_t *Stream,
+			    unsigned int num, fatAccessMode_t mode)
 {
 	unsigned char *ret;
 	unsigned int sector;
@@ -253,18 +253,18 @@ static unsigned char *getAddress(Fs_t *Stream,
 		Stream->lastFatAccessMode = mode;
 	}
 	offset = num & Stream->sectorMask;
-	return ret+offset;
+	return (uintptr_t)ret+offset;
 }
 
 
 static int readByte(Fs_t *Stream, unsigned int start)
 {
-	unsigned char *address;
+	uintptr_t address;
 
 	address = getAddress(Stream, start, FAT_ACCESS_READ);
 	if(!address)
 		return -1;
-	return *address;
+	return *(uint8_t *)address;
 }
 
 
@@ -311,17 +311,17 @@ static unsigned int fat12_decode(Fs_t *Stream, unsigned int num)
 static void fat12_encode(Fs_t *Stream, unsigned int num, unsigned int code)
 {
 	unsigned int start = num * 3 / 2;
-	unsigned char *address0 = getAddress(Stream, start, FAT_ACCESS_WRITE);
-	unsigned char *address1 = getAddress(Stream, start+1, FAT_ACCESS_WRITE);
+	uintptr_t address0 = getAddress(Stream, start, FAT_ACCESS_WRITE);
+	uintptr_t address1 = getAddress(Stream, start+1, FAT_ACCESS_WRITE);
 
 	if (num & 1) {
 		/* (odd) not on byte boundary */
-		*address0 = (*address0 & 0x0f) | ((code << 4) & 0xf0);
-		*address1 = (code >> 4) & 0xff;
+		*(uint8_t *)address0 = (*(uint8_t *)address0 & 0x0f) | ((code << 4) & 0xf0);
+		*(uint8_t *)address1 = (code >> 4) & 0xff;
 	} else {
 		/* (even) on byte boundary */
-		*address0 = code & 0xff;
-		*address1 = (*address1 & 0xf0) | ((code >> 8) & 0x0f);
+		*(uint8_t *)address0 = code & 0xff;
+		*(uint8_t *)address1 = (*(uint8_t *)address1 & 0xf0) | ((code >> 8) & 0x0f);
 	}
 }
 
@@ -336,53 +336,44 @@ static void fat12_encode(Fs_t *Stream, unsigned int num, unsigned int code)
 
 static unsigned int fat16_decode(Fs_t *Stream, unsigned int num)
 {
-	unsigned char *address = getAddress(Stream, num << 1, FAT_ACCESS_READ);
+	uintptr_t address = getAddress(Stream, num << 1, FAT_ACCESS_READ);
 	if(!address)
 		return 1;
-	return _WORD(address);
+	return WORD((uint8_t *)address);
 }
 
 static void fat16_encode(Fs_t *Stream, unsigned int num, unsigned int code)
 {
+	uintptr_t address;
 	if(code > UINT16_MAX) {
 		fprintf(stderr, "FAT16 code %x too big\n", code);
 		exit(1);
 	}
-	unsigned char *address = getAddress(Stream, num << 1, FAT_ACCESS_WRITE);
-	set_word(address, (uint16_t) code);
+	address = getAddress(Stream, num << 1, FAT_ACCESS_WRITE);
+	set_word((uint8_t *)address, (uint16_t) code);
 }
 
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-align"
 /* Ignore alignment warnings about casting to type with higher
  * alignment requirement. Requirement is met, as initial pointer is an
  * even offset into a buffer allocated by malloc, which according to
  * manpage is "suitably aligned for any built-in type */
 static unsigned int fast_fat16_decode(Fs_t *Stream, unsigned int num)
 {
-	unsigned short *address =
-		(unsigned short *) getAddress(Stream, num << 1,
-					      FAT_ACCESS_READ);
+	uintptr_t address = getAddress(Stream, num << 1, FAT_ACCESS_READ);
 	if(!address)
 		return 1;
-	return *address;
+	return *(uint16_t *) address;
 }
 
 static void fast_fat16_encode(Fs_t *Stream, unsigned int num, unsigned int code)
 {
-	unsigned short *address =
-		(unsigned short *) getAddress(Stream, num << 1,
-					      FAT_ACCESS_WRITE);
+	uintptr_t address = getAddress(Stream, num << 1, FAT_ACCESS_WRITE);
 	if(code > UINT16_MAX) {
 		fprintf(stderr, "FAT16 code %x too big\n", code);
 		exit(1);
 	}
-	*address = (uint16_t) code;
+	*(uint16_t *) address = (uint16_t) code;
 }
-#pragma GCC diagnostic pop
-
-
 
 /*
  * Fat 32 encoding
@@ -392,38 +383,33 @@ static void fast_fat16_encode(Fs_t *Stream, unsigned int num, unsigned int code)
 
 static unsigned int fat32_decode(Fs_t *Stream, unsigned int num)
 {
-	unsigned char *address = getAddress(Stream, num << 2, FAT_ACCESS_READ);
+	uintptr_t address = getAddress(Stream, num << 2, FAT_ACCESS_READ);
 	if(!address)
 		return 1;
-	return _DWORD(address) & FAT32_ADDR;
+	return DWORD((uint8_t *)address) & FAT32_ADDR;
 }
 
 static void fat32_encode(Fs_t *Stream, unsigned int num, unsigned int code)
 {
-	unsigned char *address = getAddress(Stream, num << 2, FAT_ACCESS_WRITE);
-	set_dword(address,(code&FAT32_ADDR) | (_DWORD(address)&FAT32_HIGH));
+	uintptr_t address = getAddress(Stream, num << 2, FAT_ACCESS_WRITE);
+	set_dword((uint8_t *)address,
+		  (code&FAT32_ADDR) | (DWORD((uint8_t *)address)&FAT32_HIGH));
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-align"
 static unsigned int fast_fat32_decode(Fs_t *Stream, unsigned int num)
 {
-	unsigned int *address =
-		(unsigned int *) getAddress(Stream, num << 2,
-					    FAT_ACCESS_READ);
+	uintptr_t address = getAddress(Stream, num << 2, FAT_ACCESS_READ);
 	if(!address)
 		return 1;
-	return (*address) & FAT32_ADDR;
+	return (*(uint32_t *) address) & FAT32_ADDR;
 }
 
 static void fast_fat32_encode(Fs_t *Stream, unsigned int num, unsigned int code)
 {
-	unsigned int *address =
-		(unsigned int *) getAddress(Stream, num << 2,
-					    FAT_ACCESS_WRITE);
-	*address = (*address & FAT32_HIGH) | (code & FAT32_ADDR);
+	uintptr_t address = getAddress(Stream, num << 2, FAT_ACCESS_WRITE);
+	*(uint32_t *)address =
+		(*(uint32_t *)address & FAT32_HIGH) | (code & FAT32_ADDR);
 }
-#pragma GCC diagnostic pop
 
 /*
  * Write the FAT table to the disk.  Up to now the FAT manipulation has
@@ -511,7 +497,7 @@ int zero_fat(Fs_t *Stream, uint8_t media_descriptor)
 {
 	unsigned int i, j;
 	unsigned int fat_start;
-	unsigned char *buf;
+	uint8_t *buf;
 
 	buf = malloc(Stream->sector_size);
 	if(!buf) {
@@ -529,10 +515,11 @@ int zero_fat(Fs_t *Stream, uint8_t media_descriptor)
 				if(Stream->fat_bits > 12)
 					buf[3] = 0xff;
 				if(Stream->fat_bits > 16) {
+					buf[3] = 0x0f;
 					buf[4] = 0xff;
 					buf[5] = 0xff;
 					buf[6] = 0xff;
-					buf[7] = 0x0f;
+					buf[7] = 0xff;
 				}
 			}
 
@@ -602,8 +589,12 @@ static void set_fat32(Fs_t *This)
 	}
 }
 
-void set_fat(Fs_t *This) {
-	if(This->num_clus < FAT12)
+void set_fat(Fs_t *This, bool haveBigFatLen) {
+	if(haveBigFatLen)
+		/* This is how Windows 10 behaves, despite
+		   fatgen103's stern assertion otherwise */
+		set_fat32(This);
+	else if(This->num_clus < FAT12)
 		set_fat12(This);
 	else if(This->num_clus < FAT16)
 		set_fat16(This);
@@ -660,8 +651,9 @@ static int check_fat(Fs_t *This)
  */
 static int check_media_type(Fs_t *This, union bootsector *boot)
 {
-	unsigned char *address;
-
+	uintptr_t address;
+	uint8_t *ptr;
+	
 	This->FatMap = GetFatMap(This);
 	if (This->FatMap == NULL) {
 		perror("alloc fat map");
@@ -674,26 +666,27 @@ static int check_media_type(Fs_t *This, union bootsector *boot)
 			"Could not read first FAT sector\n");
 		return -1;
 	}
-
+	ptr = (uint8_t *) address;
+	
 	if(mtools_skip_check)
 		return 0;
 
-	if(!address[0] && !address[1] && !address[2])
+	if(!ptr[0] && !ptr[1] && !ptr[2])
 		/* Some Atari disks have zeroes where Dos has media descriptor
 		 * and 0xff.  Do not consider this as an error */
 		return 0;
 
-	if((address[0] != boot->boot.descr && boot->boot.descr >= 0xf0 &&
-	    ((address[0] != 0xf9 && address[0] != 0xf7)
-	     || boot->boot.descr != 0xf0)) || address[0] < 0xf0) {
+	if((ptr[0] != boot->boot.descr && boot->boot.descr >= 0xf0 &&
+	    ((ptr[0] != 0xf9 && ptr[0] != 0xf7)
+	     || boot->boot.descr != 0xf0)) || ptr[0] < 0xf0) {
 		fprintf(stderr,
 			"Bad media types %02x/%02x, probably non-MSDOS disk\n",
-				address[0],
+				ptr[0],
 				boot->boot.descr);
 		return -1;
 	}
 
-	if(address[1] != 0xff || address[2] != 0xff){
+	if(ptr[1] != 0xff || ptr[2] != 0xff){
 		fprintf(stderr,"Initial bytes of fat is not 0xff\n");
 		return -1;
 	}
@@ -705,15 +698,14 @@ static int fat_32_read(Fs_t *This, union bootsector *boot)
 {
 	size_t size;
 
-	This->fat_len = DWORD(ext.fat32.bigFat);
+	This->fat_len = BOOT_DWORD(ext.fat32.bigFat);
 	This->writeAllFats = !(boot->boot.ext.fat32.extFlags[0] & 0x80);
 	This->primaryFat = boot->boot.ext.fat32.extFlags[0] & 0xf;
-	This->rootCluster = DWORD(ext.fat32.rootCluster);
-	This->clus_start = This->fat_start + This->num_fat * This->fat_len;
+	This->rootCluster = BOOT_DWORD(ext.fat32.rootCluster);
 
 	/* read the info sector */
 	size = This->sector_size;
-	This->infoSectorLoc = WORD(ext.fat32.infoSector);
+	This->infoSectorLoc = BOOT_WORD(ext.fat32.infoSector);
 	if(This->sector_size >= 512 &&
 	   This->infoSectorLoc && This->infoSectorLoc != MAX32) {
 		InfoSector_t *infoSector;
@@ -721,10 +713,10 @@ static int fat_32_read(Fs_t *This, union bootsector *boot)
 		if(forceReadSector(This, (char *)infoSector,
 				   This->infoSectorLoc, 1) ==
 		   (signed int) This->sector_size &&
-		   _DWORD(infoSector->signature1) == INFOSECT_SIGNATURE1 &&
-		   _DWORD(infoSector->signature2) == INFOSECT_SIGNATURE2) {
-			This->freeSpace = _DWORD(infoSector->count);
-			This->last = _DWORD(infoSector->pos);
+		   DWORD(infoSector->signature1) == INFOSECT_SIGNATURE1 &&
+		   DWORD(infoSector->signature2) == INFOSECT_SIGNATURE2) {
+			This->freeSpace = DWORD(infoSector->count);
+			This->last = DWORD(infoSector->pos);
 		}
 		free(infoSector);
 	}
@@ -746,7 +738,7 @@ static int old_fat_read(Fs_t *This, union bootsector *boot, int nodups)
 	if(check_media_type(This, boot))
 		return -1;
 
-	if(This->num_clus >= FAT12)
+	if(This->fat_bits == 16)
 		/* third FAT byte must be 0xff */
 		if(!mtools_skip_check && readByte(This, 3) != 0xff)
 			return -1;
@@ -767,7 +759,8 @@ int fat_read(Fs_t *This, union bootsector *boot, int nodups)
 	This->lastFatSectorNr = 0;
 	This->lastFatSectorData = 0;
 
-	if(This->num_clus < FAT16)
+	assert(This->fat_bits >= 12);
+	if(This->fat_bits <= 16)
 		return old_fat_read(This, boot, nodups);
 	else
 		return fat_32_read(This, boot);
@@ -863,6 +856,18 @@ unsigned int get_next_free_cluster(Fs_t *This, unsigned int last)
 	return 1;
 }
 
+bool getSerialized(Fs_t *Fs) {
+	return Fs->serialized;
+}
+
+unsigned long getSerialNumber(Fs_t *Fs) {
+	return Fs->serial_number;
+}
+
+uint32_t getClusterBytes(Fs_t *Fs) {
+	return Fs->cluster_size * Fs->sector_size;
+}
+
 int fat_error(Stream_t *Dir)
 {
 	Stream_t *Stream = GetFs(Dir);
@@ -909,15 +914,15 @@ mt_off_t getfree(Stream_t *Dir)
 		}
 		This->freeSpace = total;
 	}
-	return (mt_off_t) sectorsToBytes((Stream_t*)This,
-					  This->freeSpace * This->cluster_size);
+	return sectorsToBytes(This,
+			      This->freeSpace * This->cluster_size);
 }
 
 
 /*
  * Ensure that there is a minimum of total sectors free
  */
-int getfreeMinClusters(Stream_t *Dir, size_t size)
+int getfreeMinClusters(Stream_t *Dir, uint32_t size)
 {
 	Stream_t *Stream = GetFs(Dir);
 	DeclareThis(Fs_t);
@@ -976,20 +981,20 @@ int getfreeMinClusters(Stream_t *Dir, size_t size)
 }
 
 
-int getfreeMinBytes(Stream_t *Dir, mt_size_t size)
+int getfreeMinBytes(Stream_t *Dir, mt_off_t size)
 {
 	Stream_t *Stream = GetFs(Dir);
 	DeclareThis(Fs_t);
-	mt_size_t size2;
+	mt_off_t size2;
 
 	size2 = size  / (This->sector_size * This->cluster_size);
 	if(size % (This->sector_size * This->cluster_size))
 		size2++;
-	if(size2 > UINT32_MAX) {
+	if((smt_off_t)size2 > UINT32_MAX) {
 		fprintf(stderr, "Requested size too big\n");
 		exit(1);
 	}
-	return getfreeMinClusters(Dir, (size_t) size2);
+	return getfreeMinClusters(Dir, (uint32_t) size2);
 }
 
 

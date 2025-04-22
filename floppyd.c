@@ -1,5 +1,5 @@
 /*  Copyright 1999 Peter Schlaile.
- *  Copyright 1999-2005,2007-2009 Alain Knaff.
+ *  Copyright 1999-2005,2007-2009,2022 Alain Knaff.
  *  This file is part of mtools.
  *
  *  Mtools is free software: you can redistribute it and/or modify
@@ -29,7 +29,9 @@
  * Rewritten in C by Alain Knaff.  Apparently C++ is still not as
  * portable as C.  */
 
-#define DEBUG 0
+#ifndef DEBUG
+# define DEBUG 0
+#endif
 
 #include "sysincludes.h"
 #include "llong.h"
@@ -40,10 +42,12 @@
 
 #include "sysincludes.h"
 #include "grp.h"
-#include <X11/Xlib.h>
-#include <X11/Xauth.h>
 
 #include "floppyd_io.h"
+
+#ifdef HAVE_X11_XLIB_H
+#include <X11/Xlib.h>
+#endif
 
 #ifndef SIGCLD
 #define SIGCLD SIGCHLD
@@ -66,19 +70,18 @@
    Client sends his protocol-version. If the version between server and client
    differ: bail out.
 
-   After that,we send our .Xauthority-file (a maximum of MAX_XAUTHORITY_LENGTH
-   Bytes long) to the server.
+   After that, client sends its .Xauthority-file (a maximum of
+   MAX_XAUTHORITY_LENGTH Bytes long) to the server.
 
-   The server then checks, if it already has a .Xauthority file. If so
-   it is interpreted as LOCK-File for the floppy-device and the communication
-   gets terminated.
+   The server then stores it into a temporary location, and points its
+   XAUTHORITY variable to it, so that X libraries are able to pick it up.
 
-   (What if we have 2 floppy devices? Well. Two floppy users with different
-   home-directories should work nicely...)
+   Then server tries to open a connection to the local X-Server. If
+   this fails -> bail out.
 
-   Now, the data is written to the .Xauthority file. Then we try to open
-   a connection to the local X-Server. If this fails -> bail out.
-
+   Device locking is handled using lock_dev like everywhere else in
+   mtools, independently of Xauthority file.
+   
    ***
 
    The data packets are built as follows:
@@ -107,6 +110,8 @@
 #define BUFFERED_IO_SIZE         16348
 
 unsigned int mtools_lock_timeout=30;
+
+static unsigned int daemonize = 1;
 
 void serve_client(int sock, const char *const*device_name, unsigned int n_dev,
 		  int close_stderr);
@@ -311,12 +316,12 @@ static char send_packet(Packet packet, io_buffer fp)
 		buf_write(fp, packet->data, packet->len);
 		flush(fp);
 #if DEBUG
-		fprintf(stderr, "send_packet(): Size: %li\n", packet->len);
+		fprintf(stderr, "send_packet(): Size: %u\n", packet->len);
 #endif
 
 #if DEBUG
 		fprintf(stderr, "send_packet(): ");
-		for (int i = 0; i < packet->len; i++) {
+		for (unsigned int i = 0; i < packet->len; i++) {
 			fprintf(stderr, "%d ", packet->data[i]);
 		}
 		fprintf(stderr, "\n");
@@ -332,7 +337,7 @@ static char recv_packet(Packet packet, io_buffer fp, Dword maxlength)
 	size_t l;
 	Dword length = read_dword(fp);
 #if DEBUG
-	fprintf(stderr, "recv_packet(): Size: %li\n", length);
+	fprintf(stderr, "recv_packet(): Size: %u\n", length);
 #endif
 	if (length > maxlength || length == 0xffffffff ) {
 		return 0;
@@ -349,15 +354,18 @@ static char recv_packet(Packet packet, io_buffer fp, Dword maxlength)
 		return 0;
 	}
 #if DEBUG
-	fprintf(stderr, "*** read: %li\n", packet->len);
+	fprintf(stderr, "*** read: %u\n", packet->len);
 #endif
 
 #if DEBUG
-	fprintf(stderr, "recv_packet(): ");
-	for (i = 0; i < packet->len; i++) {
-		fprintf(stderr, "%d ", packet->data[i]);
+	{
+		unsigned int i;
+		fprintf(stderr, "recv_packet(): ");
+		for (i = 0; i < packet->len; i++) {
+			fprintf(stderr, "%d ", packet->data[i]);
+		}
+		fprintf(stderr, "\n");
 	}
-	fprintf(stderr, "\n");
 #endif
 	return 1;
 }
@@ -409,6 +417,8 @@ static const char *dispName;
 
 static char XAUTHORITY[]="XAUTHORITY";
 
+static char authFile[41]="\0";
+
 static char do_auth(io_buffer sock, unsigned int *version)
 {
 	int fd;
@@ -418,7 +428,6 @@ static char do_auth(io_buffer sock, unsigned int *version)
 	unsigned char *ptr;
 	size_t len;
 
-	char authFile[41]="/tmp/floppyd.XXXXXX";
 	unsigned char template[4096];
 
 	Packet reply = newPacket();
@@ -470,6 +479,7 @@ static char do_auth(io_buffer sock, unsigned int *version)
 	}
 
 	umask(077);
+	strcpy(authFile, "/tmp/floppyd.XXXXXX");
 	fd = mkstemp(authFile);
 	if(fd == -1) {
 		/* Different error than file exists */
@@ -517,7 +527,8 @@ static char do_auth(io_buffer sock, unsigned int *version)
 	    eat(&ptr,&len,*ptr) || /* the hostname  */
 	    eat(&ptr,&len,*ptr)) { /* the display number */
 	    destroyPacket(mit_cookie);
-	    unlink(XauFileName());
+	    unlink(authFile);
+	    authFile[0]='\0';
 	    put_dword(reply, 0, AUTH_BADPACKET);
 	    send_packet(reply, sock);
 	    destroyPacket(reply);
@@ -526,6 +537,8 @@ static char do_auth(io_buffer sock, unsigned int *version)
 
 	if(write(fd, ptr, len) < (ssize_t) len) {
 		close(fd);
+		unlink(authFile);
+		authFile[0]='\0';
 		return 0;
 	}
 	close(fd);
@@ -533,8 +546,9 @@ static char do_auth(io_buffer sock, unsigned int *version)
 	destroyPacket(mit_cookie);
 
 	displ = XOpenDisplay(dispName);
+	unlink(authFile);
+	authFile[0]='\0';
 	if (!displ) {
-		unlink(XauFileName());
 		put_dword(reply, 0, AUTH_AUTHFAILED);
 		send_packet(reply, sock);
 		destroyPacket(reply);
@@ -545,7 +559,6 @@ static char do_auth(io_buffer sock, unsigned int *version)
 	put_dword(reply, 0, AUTH_SUCCESS);
 	send_packet(reply, sock);
 	destroyPacket(reply);
-	unlink(XauFileName());
 	return 1;
 }
 
@@ -603,7 +616,7 @@ static in_addr_t getipaddress(char *ipaddr)
 		}
 
 #if DEBUG
-	fprintf(stderr, "IP lookup %s -> 0x%08lx\n", ipaddr, ip);
+	fprintf(stderr, "IP lookup %s -> 0x%08x\n", ipaddr, ip);
 #endif
 
 	return (ip);
@@ -733,15 +746,18 @@ static int bind_to_port(in_addr_t bind_ip, uint16_t bind_port)
 static int sockethandle_now = -1;
 
 /*
- * Catch alarm signals and exit.
+ * Catch pipe signals and exit.
  */
-static void alarm_signal(int a UNUSEDP) NORETURN;
-static void alarm_signal(int a UNUSEDP)
+static void handle_signal(int a UNUSEDP) NORETURN;
+static void handle_signal(int a UNUSEDP)
 {
 	if (sockethandle_now != -1) {
 		close(sockethandle_now);
 		sockethandle_now = -1;
-		unlink(XauFileName());
+		if(authFile[0]) {
+			unlink(authFile);
+			authFile[0]='\0';
+		}
 	}
 	exit(1);
 }
@@ -791,12 +807,12 @@ static void server_main_loop(int sock, const char *const*device_name,
 				exit(0);
 #if DEBUG == 0
 		}
-#endif
 		/*
 		 * Close the socket as the child does the handling.
 		 */
 		close(new_sock);
 		new_sock = -1;
+#endif
 	}
 }
 
@@ -813,6 +829,7 @@ static void usage(char *prog, const char *opt, int ret)
 	fprintf(stderr, "usage: %s [-s port [-r user] [-b ipaddr]] devicename [Names of local host]\n",
 			prog);
 	fprintf(stderr, "    -d          Run as a server (default port 5703 + DISPLAY)\n");
+	fprintf(stderr, "    -D          Do not daemonize when running as a server\n");
 	fprintf(stderr, "    -s port     Run as a server bound to the specified port.\n");
 	fprintf(stderr, "    -r user     Run as the specified user in server mode.\n");
 	fprintf(stderr, "    -b ipaddr   Bind to the specified ipaddr in server mode.\n");
@@ -850,10 +867,13 @@ int main (int argc, char** argv)
 	 */
 	if(argc > 1 && !strcmp(argv[0], "--help"))
 		usage(argv[0], NULL, 0);
-	while ((arg = getopt(argc, argv, "ds:r:b:x:h")) != EOF)
+	while ((arg = getopt(argc, argv, "dDs:r:b:x:h")) != EOF)
 		{
 			switch (arg)
 				{
+					case 'D':
+						daemonize = 0;
+						break;
 					case 'd':
 						run_as_server = 1;
 						break;
@@ -945,76 +965,77 @@ int main (int argc, char** argv)
 #if DEBUG
 		switch (0)
 #else
-			switch (fork())
+		switch ( daemonize ? fork() : 0 )
 #endif
-				{
-				case -1:
-					perror("fork()");
-					exit(1);
+			{
+			case -1:
+				perror("fork()");
+				exit(1);
 
-				case 0:
-					/*
-					 * Ignore some signals.
-					 */
-					signal(SIGHUP, SIG_IGN);
+			case 0:
+				/* Child: break in order to continue with
+				 * main code */
+				break;
+
+			default:
+				/* Parent: return right away */
+				return 0;
+			}
+		/*
+		 * Ignore some signals.
+		 */
+		signal(SIGHUP, SIG_IGN);
 #if DEBUG
-					signal(SIGINT, SIG_IGN);
+		signal(SIGINT, SIG_IGN);
 #endif
-					signal(SIGQUIT, SIG_IGN);
-					signal(SIGTSTP, SIG_IGN);
-					signal(SIGCONT, SIG_IGN);
-					signal(SIGPIPE, alarm_signal);
-					/*signal(SIGALRM, alarm_signal);*/
-
-					/*
-					 * Drop back to an untrusted user.
-					 */
-					setgid(run_gid);
-					initgroups(username, run_gid);
-					setuid(run_uid);
-
-					/*
-					 * Start a new session and group.
-					 */
-					setsid();
-#ifdef HAVE_SETPGRP
-#ifdef SETPGRP_VOID
-					setpgrp();
-#else
-					setpgrp(0,0);
-#endif
-#endif
-#if DEBUG
-					close(2);
-					open("/dev/null", O_WRONLY);
-#endif
-					/*
-					 * Handle the server main loop.
-					 */
-					server_main_loop(sock, device_name,
-							 n_dev);
-				}
+		signal(SIGQUIT, SIG_IGN);
+		signal(SIGTSTP, SIG_IGN);
+		signal(SIGCONT, SIG_IGN);
+		signal(SIGPIPE, handle_signal);
 
 		/*
-		 * Parent exits at this stage.
+		 * Drop back to an untrusted user.
 		 */
-		exit(0);
-	}
+		setgid(run_gid);
+		initgroups(username, run_gid);
+		setuid(run_uid);
 
-	signal(SIGHUP, alarm_signal);
-#if DEBUG == 0
-	signal(SIGINT, alarm_signal);
+		/*
+		 * Start a new session and group.
+		 */
+		if(daemonize) {
+			setsid();
+#ifdef HAVE_SETPGRP
+#ifdef SETPGRP_VOID
+			setpgrp();
+#else
+			setpgrp(0,0);
 #endif
-	signal(SIGQUIT, alarm_signal);
-	signal(SIGTERM, alarm_signal);
-	signal(SIGTSTP, SIG_IGN);
-	signal(SIGCONT, SIG_IGN);
-	signal(SIGPIPE, alarm_signal);
-	/*signal(SIGALRM, alarm_signal);*/
+#endif
+		}
+#if DEBUG
+		close(2);
+		open("/dev/null", O_WRONLY);
+#endif
+		/*
+		 * Handle the server main loop.
+		 */
+		server_main_loop(sock, device_name, n_dev);
 
-	/* Starting from inetd */
+	} else {
+		/* Starting from inetd, serve a single client */
+		signal(SIGHUP, handle_signal);
+#if DEBUG == 0
+		signal(SIGINT, handle_signal);
+#endif
+		signal(SIGQUIT, handle_signal);
+		signal(SIGTERM, handle_signal);
+		signal(SIGTSTP, SIG_IGN);
+		signal(SIGCONT, SIG_IGN);
+		signal(SIGPIPE, handle_signal);
 
-	serve_client(sockfd, device_name, n_dev, 1);
+		serve_client(sockfd, device_name, n_dev, 1);
+	}
 	return 0;
 }
 
@@ -1048,14 +1069,21 @@ static void send_reply64(int rval, io_buffer sock, mt_off_t len) {
 
 static void cleanup(int x UNUSEDP) NORETURN;
 static void cleanup(int x UNUSEDP) {
-	unlink(XauFileName());
+	if(authFile[0]) {
+		unlink(authFile);
+		authFile[0]='\0';
+	}
 	exit(-1);
 }
 
 #include "lockdev.h"
 
 void serve_client(int sockhandle, const char *const*device_name,
-		  unsigned int n_dev, int close_stderr) {
+		  unsigned int n_dev, int close_stderr
+#if DEBUG
+		  UNUSEDP
+#endif
+		  ) {
 	Packet opcode;
 	Packet parm;
 
@@ -1102,14 +1130,10 @@ void serve_client(int sockhandle, const char *const*device_name,
 	}
 	alarm(0);
 
-
 	signal(SIGTERM, cleanup);
 	signal(SIGALRM, cleanup);
 
-
-
 	sockethandle_now = sockhandle;
-
 
 	opcode = newPacket();
 	parm = newPacket();
@@ -1236,7 +1260,7 @@ void serve_client(int sockhandle, const char *const*device_name,
 #endif
 
 				lseek(devFd,
-				      get_dword(parm, 0),
+				      (off_t) get_dword(parm, 0),
 				      (int) get_dword(parm, 4));
 				send_reply(devFd,
 					   sock,
@@ -1309,7 +1333,6 @@ void serve_client(int sockhandle, const char *const*device_name,
 	free_io_buffer(sock);
 
 	/* remove "Lock"-File  */
-	unlink(XauFileName());
 
 	if(needSendReply)
 	    send_reply(rval, sock, 0);

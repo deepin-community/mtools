@@ -1,5 +1,5 @@
 '\" t
-.TH mtools 1 "10Jul21" mtools-4.0.32
+.TH mtools 1 "22Feb25" mtools-4.0.48
 .SH Name
 mtools - utilities to access DOS disks in Unix.
 '\" t
@@ -36,7 +36,7 @@ Mtools can be found at the following places (and their mirrors):
 .nf
 .ft 3
 .in +0.3i
-http://ftp.gnu.org/gnu/mtools/mtools-4.0.32.tar.gz
+http://ftp.gnu.org/gnu/mtools/mtools-4.0.48.tar.gz
 .fi
 .in -0.3i
 .ft R
@@ -82,13 +82,17 @@ All options use the \fR\&\f(CW-\fR (minus) as their first character, not
 Most mtools commands allow multiple filename parameters, which
 doesn't follow MS-DOS conventions, but which is more user-friendly.
 .PP
-Most mtools commands allow options that instruct them how to handle file
-name clashes. See section name clashes, for more details on these. All
-commands accept the \fR\&\f(CW-V\fR flags which prints the version, and most
-accept the \fR\&\f(CW-v\fR flag, which switches on verbose mode. In verbose
-mode, these commands print out the name of the MS-DOS files upon which
-they act, unless stated otherwise. See section Commands, for a description of
-the options which are specific to each command.
+Most mtools commands allow options that instruct them how to handle
+file name clashes. See section name clashes, for more details on these.
+.PP
+All commands accept the \fR\&\f(CW-i\fR flag which allows to specify an
+image file (See section drive letters).
+.PP
+All commands accept the \fR\&\f(CW-V\fR flag which prints the version, and
+most accept the \fR\&\f(CW-v\fR flag, which switches on verbose mode. In
+verbose mode, these commands print out the name of the MS-DOS files
+upon which they act, unless stated otherwise. See section Commands, for a
+description of the options which are specific to each command.
 .PP
 .SS Drive\ letters
 .PP
@@ -141,13 +145,49 @@ Example:
 This looks for the image at the offset of 1M in the file, rather than
 at its beginning.
 .PP
+.SS Sizes\ and\ offsets
+.PP
+Certain commands, such as \fR\&\f(CWmformat\fR, allow you to specify a hard
+disk size.
+.PP
+The size is a number, followed by an optional unit suffix.
+.PP
+The number is interpreted as a hexadecimal number if it starts with
+\&\fR\&\f(CW0x\fR, as an octal number if it starts with the digit \fR\&\f(CW0\fR, or
+as a decimal number if it starts with any other digit.
+.PP
+The following units are supported:
+.TP
+* \ \ 
+\&\fR\&\f(CWS\fR sectors (of 512 bytes)
+.TP
+* \ \ 
+\&\fR\&\f(CWK\fR Kilobytes
+.TP
+* \ \ 
+\&\fR\&\f(CWM\fR Megabytes
+.TP
+* \ \ 
+\&\fR\&\f(CWG\fR Gigabytes
+.TP
+* \ \ 
+\&\fR\&\f(CWT\fR Terabytes
+.PP
+If no unit is specified, the default depends on context. Mformat's
+\&\fR\&\f(CWT\fR option, and mpartition's \fR\&\f(CWl\fR option assume sectors,
+whereas all other places (mshowfat's \fR\&\f(CWo\fR option, \fR\&\f(CWoffset\fR
+drive config option and \fR\&\f(CWdata_map\fR drive config option) assume
+bytes.
+.PP
 .SS Current\ working\ directory
 .PP
 The \fR\&\f(CWmcd\fR command (\(ifmcd\(is) is used to establish the device and
 the current working directory (relative to the MS-DOS file system),
 otherwise the default is assumed to be \fR\&\f(CWA:/\fR. However, unlike
 MS-DOS, there is only one working directory for all drives, and not one
-per drive.
+per drive. Moreover, if you set drive \fR\&\f(CW::/\fR, mtools does not
+remember the associated image file, but only the fact that you are
+working on an image file at all.
 .PP
 .SS VFAT-style\ long\ file\ names
 .PP
@@ -474,16 +514,27 @@ mtools. Set the environmental variable MTOOLS_FAT_COMPATIBILITY (or the
 corresponding configuration file variable, \(ifglobal variables\(is) to
 bypass the fat checking.
 .PP
+.SS Credits
+.PP
+Original code (versions through 2.0.7?) of mtools was developped by
+Emmet P. Gray (Texas, USA).
+.PP
+David C. Niemi contributed VFAT support and helped maintain mtools.
+.PP
+The packaging process of mtools uses a modified version of Beverly
+A. Erlebacher's texi2roff tool to convert the texi documentation into
+man pages.
+.PP
 .SH See also
 floppyd_installtest
 mattrib
 mbadblocks
 mcd
-mclasserase
 mcopy
 mdel
 mdeltree
 mdir
+mdoctorfat
 mdu
 mformat
 minfo

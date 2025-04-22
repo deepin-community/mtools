@@ -16,7 +16,6 @@
  */
 
 #include "sysincludes.h"
-#include "msdos.h"
 #include "stream.h"
 #include "file.h"
 #include "mtoolsDirentry.h"
@@ -36,6 +35,35 @@ int isNotFound(direntry_t *entry)
 	return entry->entry == -2;
 }
 
+int isRootEntry(direntry_t *entry)
+{
+	return entry->entry == -3;
+}
+
+void setEntryForIteration(direntry_t *entry, unsigned int in) {
+	int out = (int) in;
+	assert(out >= 0);
+	entry->entry = out - 1;
+}
+
+void setEntryToPos(direntry_t *entry, unsigned int in) {
+	int out = (int) in;
+	assert(out >= 0);
+	entry->entry = out;
+}
+
+unsigned int getEntryAsPos(direntry_t *entry) {
+	int pos = entry->entry;
+	assert(pos >= 0);
+	return (unsigned int) pos;
+}
+
+unsigned int getNextEntryAsPos(direntry_t *entry) {
+	int pos = entry->entry+1;
+	assert(pos >= 0);
+	return (unsigned int) pos;
+}
+
 direntry_t *getParent(direntry_t *entry)
 {
 	return getDirentry(entry->Dir);
@@ -47,7 +75,7 @@ static size_t getPathLen(direntry_t *entry)
 	size_t length=0;
 
 	while(1) {
-		if(entry->entry == -3) /* rootDir */
+		if(isRootEntry(entry)) /* rootDir */
 			return length + 3;
 
 		length += 1 + wcslen(entry->name);
@@ -57,7 +85,7 @@ static size_t getPathLen(direntry_t *entry)
 
 static char *sprintPwd(direntry_t *entry, char *ptr, size_t *len_available)
 {
-	if(entry->entry == -3) {
+	if(isRootEntry(entry)) {
 		*ptr++ = getDrive(entry->Dir);
 		*ptr++ = ':';
 		*ptr++ = '/';
@@ -84,15 +112,15 @@ static char *sprintPwd(direntry_t *entry, char *ptr, size_t *len_available)
 #define NEED_ESCAPE "\"$\\"
 #endif
 
-static void _fprintPwd(FILE *f, direntry_t *entry, int recurs, int escape)
+static void mt_fprintPwd(FILE *f, direntry_t *entry, int recurs, int escape)
 {
-	if(entry->entry == -3) {
+	if(isRootEntry(entry)) {
 		putc(getDrive(entry->Dir), f);
 		putc(':', f);
 		if(!recurs)
 			putc('/', f);
 	} else {
-		_fprintPwd(f, getDirentry(entry->Dir), 1, escape);
+		mt_fprintPwd(f, getDirentry(entry->Dir), 1, escape);
 		if (escape && wcspbrk(entry->name, NEED_ESCAPE)) {
 			wchar_t *ptr;
 			putc('/', f);
@@ -113,21 +141,21 @@ void fprintPwd(FILE *f, direntry_t *entry, int escape)
 {
 	if (escape)
 		putc('"', f);
-	_fprintPwd(f, entry, 0, escape);
+	mt_fprintPwd(f, entry, 0, escape);
 	if(escape)
 		putc('"', f);
 }
 
-static void _fprintShortPwd(FILE *f, direntry_t *entry, int recurs)
+static void mt_fprintShortPwd(FILE *f, direntry_t *entry, int recurs)
 {
-	if(entry->entry == -3) {
+	if(isRootEntry(entry)) {
 		putc(getDrive(entry->Dir), f);
 		putc(':', f);
 		if(!recurs)
 			putc('/', f);
 	} else {
 		int i,j;
-		_fprintShortPwd(f, getDirentry(entry->Dir), 1);
+		mt_fprintShortPwd(f, getDirentry(entry->Dir), 1);
 		putc('/',f);
 		for(i=7; i>=0 && entry->dir.name[i] == ' ';i--);
 		for(j=0; j<=i; j++)
@@ -142,7 +170,7 @@ static void _fprintShortPwd(FILE *f, direntry_t *entry, int recurs)
 
 void fprintShortPwd(FILE *f, direntry_t *entry)
 {
-	_fprintShortPwd(f, entry, 0);
+	mt_fprintShortPwd(f, entry, 0);
 }
 
 char *getPwd(direntry_t *entry)
@@ -167,7 +195,7 @@ int isSubdirOf(Stream_t *inside, Stream_t *outside)
 	while(1) {
 		if(inside == outside) /* both are the same */
 			return 1;
-		if(getDirentry(inside)->entry == -3) /* root directory */
+		if(isRootEntry(getDirentry(inside))) /* root directory */
 			return 0;
 		/* look further up */
 		inside = getDirentry(inside)->Dir;

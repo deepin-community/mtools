@@ -16,11 +16,10 @@
  *  along with Mtools.  If not, see <http://www.gnu.org/licenses/>.
  *
  * mattrib.c
- * Change MSDOS file attribute flags
+ * Change MSDOS file attribute tags
  */
 
 #include "sysincludes.h"
-#include "msdos.h"
 #include "mtools.h"
 #include "mainloop.h"
 
@@ -35,7 +34,7 @@ static int attrib_file(direntry_t *entry, MainParam_t *mp)
 {
 	Arg_t *arg=(Arg_t *) mp->arg;
 
-	if(entry->entry != -3) {
+	if(!isRootEntry(entry)) {
 		/* if not root directory, change it */
 		entry->dir.attr = (entry->dir.attr & arg->remove) | arg->add;
 		dir_write(entry);
@@ -185,7 +184,7 @@ void mattrib(int argc, char **argv, int type UNUSEDP)
 		switch (c) {
 			case 'h':
 				wantUsage = 1;
-				/* FALL THROUGH */
+				FALLTHROUGH
 			default:
 				arg.remove &= ~letterToCode(c);
 				break;

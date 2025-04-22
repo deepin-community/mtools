@@ -17,10 +17,8 @@
  */
 
 #include "sysincludes.h"
-#include "msdos.h"
 #include "mtools.h"
 #include "vfat.h"
-#include "codepage.h"
 #include "file_name.h"
 
 /* Write a DOS name + extension into a legal unix-style name.  */
@@ -30,7 +28,8 @@ char *unix_normalize (doscp_t *cp, char *ans, dos_name_t *dn, size_t ans_size)
 	wchar_t wbuffer[13];
 	char *a;
 	int j;
-
+	size_t len;
+	
 	for (a=buffer,j=0; (j<8) && (dn->base[j] > ' '); ++j,++a)
 		*a = dn->base[j];
 	if(dn->ext[0] > ' ') {
@@ -38,9 +37,10 @@ char *unix_normalize (doscp_t *cp, char *ans, dos_name_t *dn, size_t ans_size)
 		for (j=0; j<3 && dn->ext[j] > ' '; ++j,++a)
 			*a = dn->ext[j];
 	}
-	*a++ = '\0';
-	dos_to_wchar(cp, buffer, wbuffer, 13);
-	wchar_to_native(wbuffer, ans, 13, ans_size);
+	*a = '\0';
+	len = (size_t)(a-buffer);
+	dos_to_wchar(cp, buffer, wbuffer, len);
+	wchar_to_native(wbuffer, ans, len, ans_size);
 	return ans;
 }
 
@@ -112,7 +112,7 @@ void dos_name(doscp_t *toDos, const char *name, int verbose UNUSEDP,
 		name = &name[2];
 
 	/* zap the leading path */
-	name = _basename(name);
+	name = mt_basename(name);
 	if ((s = strrchr(name, '\\')))
 		name = s + 1;
 
@@ -188,39 +188,31 @@ wchar_t *unix_name(doscp_t *dosCp,
 		strcpy(ans, tname);
 
 	/* fix special characters (above 0x80) */
-	dos_to_wchar(dosCp, ans, ret, 12);
+	dos_to_wchar(dosCp, ans, ret, strlen(ans));
 	return ret;
 }
 
-/* If null encountered, set *end to 0x40 and write nulls rest of way
- * 950820: Win95 does not like this!  It complains about bad characters.
- * So, instead: If null encountered, set *end to 0x40, write the null, and
- * write 0xff the rest of the way (that is what Win95 seems to do; hopefully
- * that will make it happy)
- */
-/* Always return num */
-int unicode_write(wchar_t *in, struct unicode_char *out, int num, int *end_p)
+int isSpecial(const char *name)
 {
-	int j;
-
-	for (j=0; j<num; ++j) {
-		if (*end_p)
-			/* Fill with 0xff */
-			out->uchar = out->lchar = 0xff;
-		else {
-			/* TODO / FIXME : handle case where wchat has more
-			 * than 2 bytes (i.e. bytes 2 or 3 are set.
-			 * ==> generate surrogate pairs?
-			 */
-			out->uchar = (*in & 0xffff) >> 8;
-			out->lchar = *in & 0xff;
-			if (! *in) {
-				*end_p = VSE_LAST;
-			}
-		}
-
-		++out;
-		++in;
-	}
-	return num;
+	if(name[0] == '\0')
+		return 1;
+	if(!strcmp(name,"."))
+		return 1;
+	if(!strcmp(name,".."))
+		return 1;
+	return 0;
 }
+
+#ifdef HAVE_WCHAR_H
+int isSpecialW(const wchar_t *name)
+{
+	if(name[0] == '\0')
+		return 1;
+	if(!wcscmp(name,L"."))
+		return 1;
+	if(!wcscmp(name,L".."))
+		return 1;
+	return 0;
+}
+#endif
+
