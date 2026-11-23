@@ -1,3 +1,11 @@
+mtools (4.0.48-1deepin1) unstable; urgency=medium
+
+  * fix(cve): CVE-2026-118384 (medium) - CVE-2026-118384   Upstream:
+    https://github.com/OothecaPickle/mtools/commit/2debf161774a49450e7f2
+    5342653169473d0cf1e
+
+ -- deepin-ci-robot <packages@deepin.org>  Mon, 23 Nov 2026 17:23:35 +0800
+
 mtools (4.0.48-1) unstable; urgency=medium
 
   * QA upload.
